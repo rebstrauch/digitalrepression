@@ -1,0 +1,79 @@
+---
+title: "Digital Repression"
+author: "Rebecca Strauch"
+date: "3/9/2022"
+output: html_document
+---
+
+Write as loop
+```{r}  
+rm(list = ls())
+library(jsonlite)
+library(tidyverse)
+#library(usethis) 
+#usethis::edit_r_environ()
+
+
+  
+temp <- list.files("/Users/rebeccastrauch/Documents/OONI/RU/201912/20191225", recursive=TRUE, full.names = TRUE) 
+
+#temp <- list.files("/Volumes/Extreme SSD 1 TB/RU/201910/20191001", recursive=TRUE, full.names = TRUE)
+#temp <- list.files("/Volumes/Extreme SSD 1 TB/UA/2020", recursive=TRUE, full.names = TRUE)
+#temp <- list.files("/Volumes/LaCie Rugged THB 1TB/CN/2020", recursive=TRUE, full.names = TRUE)
+#temp <- list.files("/Volumes/Seagate Portable Drive/OONI/RU/2017p", recursive=TRUE, full.names = TRUE)
+#temp <- list.files("/Users/rebeccastrauch/Documents/OONI/PH/2020", recursive=TRUE, full.names = TRUE)
+
+  r <- function(temp){
+  
+
+test<-map(temp, ~ .x %>% gzfile() %>% stream_in())
+
+
+data <- list()
+data$measurement_start_time<-map(test, ~ .x$measurement_start_time)
+data$test_runtime<- map(test, ~ .x$test_runtime)
+data$test_name<- map(test, ~ .x$test_name)
+data$input<- map(test, ~ .x$input)
+data$report_id<- map(test, ~ .x$report_id)
+data$probe_asn<- map(test, ~ .x$probe_asn)
+data$probe_cc<- map(test, ~ .x$probe_cc)
+data$accessible<- map(test, ~ .x$test_keys$accessible)
+data$blocking<- map(test, ~ .x$test_keys$blocking)
+
+df <- data.frame(measurement_start_time=unlist(data$measurement_start_time, use.names = FALSE),
+                test_runtime=unlist(data$test_runtime, use.names = FALSE),
+                test_name=unlist(data$test_name, use.names = FALSE),
+                input=unlist(data$input, use.names = FALSE),
+                report_id=unlist(data$report_id, use.names = FALSE),
+                probe_asn=unlist(data$probe_asn, use.names = FALSE),
+                probe_cc=unlist(data$probe_cc, use.names = FALSE),    
+                accessible=unlist(data$accessible, use.names = FALSE),
+                blocking=unlist(data$blocking, use.names = FALSE))
+return(df)
+
+}
+x<- r(temp)
+write.csv(x, "~/Documents/digitalrepression/Digital Repression/OONI/RU_20191225.csv", row.names = FALSE)
+
+
+```
+
+
+
+
+
+
+
+
+
+
+  
+  
+
+
+
+
+
+
+
+
