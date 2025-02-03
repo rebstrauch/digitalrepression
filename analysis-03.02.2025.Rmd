@@ -1,0 +1,345 @@
+---
+title: "analysis-digital-repression"
+author: "Rebecca Strauch"
+date: "03/02/2025"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+Load data
+```{r}
+rm(list = ls())
+library(readr)
+library(stargazer)
+library(tidyverse)
+library(survival)
+library(janitor)
+#remotes::install_github("mgahan/boRingTrees")
+library(boRingTrees)
+library(ggplot2)
+library(GJRM)
+library(viridis)
+library(systemfit)
+library(countrycode)
+events<- read.csv("df-repression.csv", stringsAsFactors=FALSE)
+```
+
+```{r}
+#change NA's to 0 observations for IODA data and physical repression (where there are no observations, I can be sure that in both cases, no physical violence nor Internet outage occurred)
+table(events$physical)
+events$physical[is.na(events$physical)] <- 0
+
+table(events$ioda)
+events$ioda[is.na(events$ioda)] <- 0
+
+
+
+#event history (has a protest occurred in the last 31 days)
+events$event_date <- as.Date(events$event_date)
+events <- data.table(events)
+events <- events[,history:=rollingByCalcs(events,bylist="cowcode",dates="event_date",
+                          lower=0,upper=31,incbounds=F,stat=sum)]
+
+
+
+#create digital repression variable: if any type of digital interference occurred (may it be censorship or outage), the value takes 1 and 0 otherwise 
+events$digital <- ifelse(events$ioda==1 | events$ooni==1, 1,0)
+events$digital[is.na(events$digital)] <- 0
+table(events$digital)
+
+#change protest variables to dichotomous variables
+events$damage <- ifelse(events$max_partviolence==1,1,0)
+events$damage[is.na(events$damage)] <- 0
+events$injured <- ifelse(events$max_partviolence==2,1,0)
+events$injured[is.na(events$injured)] <- 0
+events$killed <- ifelse(events$max_partviolence==3,1,0)
+events$killed[is.na(events$killed)] <- 0
+
+table(events$max_scope)
+events$state <- ifelse(events$max_scope==0, 1, 0)
+events$regional <- ifelse(events$max_scope==1, 1, 0)
+
+
+```
+
+
+```{r}
+#Physical vs digital repression
+table(events$physical, events$digital)
+table <- events %>% dplyr::select(physical, digital)
+table$physical <- ifelse(table$physical==1,"physical repression","no physical repression")
+table$digital <- ifelse(table$digital==1,"digital repression","no digital repression")
+t1 <- table %>% tabyl(physical, digital)
+colnames(t1) = c("", "digital repression", "no digital repression")
+stargazer(as.data.frame(t1), summary=FALSE, rownames = F,
+          out="~/Dropbox/Apps/Overleaf/DigitalRepression/t1.tex", float = F)
+
+#physical vs outage vs censorship 
+table2 <- events %>% dplyr::select(physical, ooni, ioda) %>% ungroup() 
+table2$physical <- ifelse(table2$physical==1,"physical repression","no physical repression")
+table2$ioda <- ifelse(table2$ioda==1,"outage occurrence","no outage occurrence")
+table2$ooni <- ifelse(table2$ooni==1,"censorship occurrence","no censorship occurrence")
+
+table(table2$physical, table2$ioda, table2$ooni)
+t2<-as.data.frame(ftable(table2))
+colnames(t2) = c("", "", "", "")
+stargazer(as.data.frame(t2), summary=F, rownames = F,
+          out="~/Dropbox/Apps/Overleaf/DigitalRepression/t2.tex", float = F)
+
+summary <- events %>% dplyr::select(ooni, ioda, digital, physical,  All_NGO, damage, injured, killed, state, regional, history)
+
+stargazer(as.data.frame(summary),
+          title="Summary Statistics",
+          out="~/Dropbox/Apps/Overleaf/DigitalRepression/appendix-A1.tex",
+          float = F,
+          digits = 2,
+          omit.summary.stat = c("p25", "p75"),
+          covariate.labels = c("online censorship","Internet outages", "digital repression", "physical repression", "number of INGOs", "damage", "injured", "killed", "state", "regional", "history"))
+
+
+
+```
+Visualizations
+```{r}
+#Plot types of repression across countries
+events$country <- countrycode(events$cowcode, origin = 'iso2c', destination = 'country.name')
+
+events.group <- events %>%
+  group_by(country, physical, ioda, ooni, event_date) %>%
+  dplyr::count()
+
+#generate new variable
+events.group$repr[events.group$physical==1 & events.group$ioda==0 & events.group$ooni==0 | events.group$ooni==NA] <- "Physical"
+events.group$repr[events.group$physical==0 & events.group$ioda==1 & events.group$ooni==0 | events.group$ooni==NA] <- "Outage"
+events.group$repr[events.group$physical==0 & events.group$ioda==0 & events.group$ooni==1] <- "Censorship"
+events.group$repr[events.group$physical==1 & events.group$ioda==1 & events.group$ooni==0 | events.group$ooni==NA] <- "Physical and outage"
+events.group$repr[events.group$physical==1 & events.group$ioda==0 & events.group$ooni==1] <- "Physical and censorship"
+events.group$repr[events.group$physical==0 & events.group$ioda==1 & events.group$ooni==1] <- "Outage and censorship"
+events.group$repr[events.group$physical==1 & events.group$ioda==1 & events.group$ooni==1] <- "Physical, outage and censorship"
+
+
+
+#distinct tactics
+repr.distinct <- events.group %>% filter(repr=="Physical" | repr=="Outage" | repr=="Censorship")
+
+pdf(file.path(file = "~/Dropbox/Apps/Overleaf/DigitalRepression/repr_types_dist.pdf"), width=8,height=11,paper='special')
+ggplot(repr.distinct, aes(x = event_date, y = country, fill = repr)) +
+  geom_tile() +ylab("") + xlab("")  + theme_minimal() + labs(fill='Type of repression') + scale_fill_viridis(discrete = T) 
+dev.off()
+
+#tactics combined 
+repr.combined <- events.group %>% filter(repr=="Physical and outage" | repr=="Physical and censorship" | repr=="Outage and censorship" | repr=="Physical, outage and censorship")
+
+pdf(file.path(file = "~/Dropbox/Apps/Overleaf/DigitalRepression/repr_types_comb.pdf"), width=8,height=11,paper='special')
+ggplot(repr.combined, aes(x = event_date, y = country, fill = repr)) +
+  geom_tile() +ylab("") + xlab("") + theme_minimal() + labs(fill='Type of repression')+ scale_fill_viridis(discrete = T) 
+dev.off()
+
+
+```
+
+
+Modifications to variables
+```{r}
+#create month variable
+events$month <- format(events$event_date, format="%Y-%m")
+
+#scientific notation
+#options(digits = 4)
+events <- events %>% dplyr::filter(event_date>"2016-12-31")
+
+```
+
+Seemingly unrelated bivariate probit with GJRM package 
+Stage I: physical vs digital repression
+```{r}
+###drop all cases with no repression at all (conditional on repression)
+events2 <- events %>% filter(!physical==0 | !digital==0)
+table(events2$physical, events2$digital)
+```
+
+
+INGOs
+```{r}
+All_NGO  <- gjrm(list(physical ~ All_NGO + log(mean_avg_numparticipants) + damage + injured + killed + state + regional + history + as.factor(cowcode), 
+                       digital ~  All_NGO + log(mean_avg_numparticipants) +  damage + injured + killed + state + regional + history + as.factor(cowcode)),
+                       data = events2, 
+                       margins = c("probit", "probit"),
+                       model = "B")
+
+conv.check(All_NGO)
+All_NGO <- summary(All_NGO)
+
+stargazer(All_NGO$tableP1,
+          out="~/Dropbox/Apps/Overleaf/DigitalRepression/All_NGO_1.tex",
+          float = F,
+          covariate.labels="Physical repression",
+          notes = c("n=1636; theta=-1"),
+          notes.append = F)
+
+stargazer(All_NGO$tableP2,
+          out="~/Dropbox/Apps/Overleaf/DigitalRepression/All_NGO_2.tex",
+          float = F,
+          covariate.labels="Digital repression",
+          notes = c("n=1636; theta=-1"),
+          notes.append = F)
+
+```
+
+
+Robustness check: oil and military 
+```{r}
+
+oil_1  <- gjrm(list(physical ~ All_NGO + oil + military + log(mean_avg_numparticipants) + damage + injured + killed + state + regional + history + as.factor(cowcode), 
+                       digital ~  All_NGO + oil + military + log(mean_avg_numparticipants) +  damage + injured + killed + state + regional + history + as.factor(cowcode)),
+                       data = events2, 
+                       margins = c("probit", "probit"),
+                       model = "B")
+
+conv.check(oil_1)
+oil_1 <- summary(oil_1)
+
+stargazer(oil_1$tableP1,
+          out="~/Dropbox/Apps/Overleaf/DigitalRepression/appendix-A21.tex",
+          float = F,
+          covariate.labels="Physical repression",
+          notes = c("n=1533; theta=-1"),
+          notes.append = F)
+
+stargazer(oil_1$tableP2,
+          out="~/Dropbox/Apps/Overleaf/DigitalRepression/appendix-A22.tex",
+          float = F,
+          covariate.labels="Digital repression",
+          notes = c("n=1533; theta=-1"),
+          notes.append = F)
+
+
+```
+Robustness: additional cut-off at median
+
+```{r}
+summary(events$ooni_ratio)
+events$ooni_cut <- ifelse(events$ooni_ratio>0.038, 1, 0)
+
+events$digital_cut <- ifelse(events$ioda==1 | events$ooni_cut==1, 1,0)
+events$digital_cut[is.na(events$digital_cut)] <- 0
+table(events$digital_cut)
+
+events2 <- events %>% filter(!physical==0|!digital==0)
+
+NGO_cut  <- gjrm(list(physical ~ All_NGO + log(mean_avg_numparticipants) + damage + injured + killed + state + regional + history + as.factor(cowcode), 
+                       digital_cut ~  All_NGO  + log(mean_avg_numparticipants) +  damage + injured + killed + state + regional + history + as.factor(cowcode)),
+                       data = events2,
+                       margins = c("probit", "probit"),
+                       model = "B")
+
+conv.check(NGO_cut)
+NGO_cut <-summary(NGO_cut)
+
+stargazer(NGO_cut$tableP1,
+          out="~/Dropbox/Apps/Overleaf/DigitalRepression/appendix-A17.tex",
+          float = F,
+          covariate.labels="Physical repression",
+          notes = c("n=1636; theta=-0.785"),
+          notes.append = F)
+
+stargazer(NGO_cut$tableP2,
+          out="~/Dropbox/Apps/Overleaf/DigitalRepression/appendix-A18.tex",
+          float = F,
+          covariate.labels="Digital repression",
+          notes = c("n=1636; theta=-0.785"),
+          notes.append = F)
+```
+Placebo test: simulation
+```{r}
+check <- events2 %>%
+  group_by(cowcode, year) %>%
+  select(All_NGO) %>%
+  distinct()
+
+sim <- events2 %>%
+    dplyr::select(physical, digital, All_NGO, mean_avg_numparticipants, damage, injured, killed, state, regional, history, cowcode)
+
+###We use three different sets of seeds. 
+seeds <- c(1:1000)
+
+###Run Simulation of country, year and weekday FEs
+result_physical <- vector("numeric", 1000) ###create container to store results 
+result_digital <- vector("numeric", 1000)
+for (seed in seeds) {
+  set.seed(seed)
+  sim <- sim %>%
+    mutate(placebo_physical = sample(physical), 
+           placebo_digital = sample(digital)) 
+  model <- gjrm(list(placebo_physical ~ All_NGO + log(mean_avg_numparticipants) + damage + injured + killed + state + regional + history + as.factor(cowcode), 
+                       placebo_digital ~  All_NGO + log(mean_avg_numparticipants) +  damage + injured + killed + state + regional + history + as.factor(cowcode)),
+                       data = sim, 
+                       margins = c("probit", "probit"),
+                       model = "B")
+  model <- summary(model)
+  result_physical[seed] <- model$tableP1[[2]]
+  result_digital[seed] <- model$tableP2[[2]]
+}
+
+quantile(result_physical, c(.90, .95, .99))
+quantile(result_digital, c(.90, .95, .99))
+
+pdf(file.path(file = "~/Dropbox/Apps/Overleaf/DigitalRepression/placebo_NGO.pdf"), width=7,height=4,paper='special')
+plot(density(result_digital), main = "", xlim=c(-0.15, 0.15)) + abline(v=0.117, col="red", lty=2)
+dev.off()
+
+
+```
+
+
+
+Hyp 2: Trivariate Regression
+```{r}
+All_NGO_2  <- gjrm(list(physical ~ All_NGO  + log(mean_avg_numparticipants) + damage + injured + killed + state + regional + history + as.factor(cowcode), 
+                       ioda ~ All_NGO + log(mean_avg_numparticipants) + damage + injured + killed + state + regional + history + as.factor(cowcode),
+                     ooni ~ All_NGO + log(mean_avg_numparticipants) + damage + injured + killed + state + regional + history + as.factor(cowcode)),
+                       data = events2, 
+                       margins = c("probit", "probit", "probit"),
+                       model = "T")
+conv.check(All_NGO_2)
+All_NGO_2 <- summary(All_NGO_2)
+
+
+stargazer(All_NGO_2$tableP1,
+          out="~/Dropbox/Apps/Overleaf/DigitalRepression/All_NGO_3.tex",
+          float = F,
+          covariate.labels="Physical repression",
+          notes = c("n=1123; theta(1,2)=-0.184; theta(1,3)=-0.879"),
+          notes.append = F)
+
+stargazer(All_NGO_2$tableP2,
+          out="~/Dropbox/Apps/Overleaf/DigitalRepression/All_NGO_4.tex",
+          float = F,
+          covariate.labels="Internet outages",
+          notes = c("n=1123 ; theta(1,2)=-0.184; theta(2,3)=-0.238"),
+          notes.append = F)
+
+stargazer(All_NGO_2$tableP3,
+          out="~/Dropbox/Apps/Overleaf/DigitalRepression/All_NGO_5.tex",
+          float = F,
+          covariate.labels="Online censorship",
+          notes = c("n=1123 ; theta(1,3)=-0.879; theta(2,3)=-0.238"),
+          notes.append = F)
+
+
+```
+
+
+
+
+
+
+
+

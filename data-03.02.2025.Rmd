@@ -1,0 +1,405 @@
+---
+title: "data-digital-repression"
+author: "Rebecca Strauch"
+date: "03/02/2025"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Load libraries
+```{r, results='asis', warning=FALSE}
+rm(list = ls())
+library(readr)
+library(tidyverse)
+library(plyr)
+library(countrycode)
+library(lubridate)
+library(readxl)
+library(reshape2)
+#remotes::install_github("xmarquez/vdem")
+library(vdem)
+library(stringr)
+library(WDI)
+```
+Protest data (MMAD v4)
+```{r}
+mmad <- read.csv("events-v4.csv")
+
+#Only keep anti-government protest.
+events <- dplyr::filter(mmad, side == 1)
+
+events$event_date <- as.Date(events$event_date)
+
+serbia <- events %>% filter(cowcode==345)
+serbia$cowcode <- "RS"
+events <- events %>% filter(!cowcode==345)
+events$cowcode <- countrycode(events$cowcode, origin = 'cown', destination = 'iso2c')
+events <- rbind(events, serbia)
+
+ru <- events %>% filter(cowcode=="RU")
+test <- events %>% 
+  dplyr::group_by(year,cowcode) %>%
+  dplyr::count()
+
+```
+
+OONI data (Censored websites)
+```{r}
+ooni <- read.csv("ooni.csv")
+
+###Select only those requests where anomalies were detected 
+ooni$anomaly <- ifelse(ooni$blocking==FALSE,FALSE,TRUE)
+
+###Change date
+ooni$measurement_start_time <- as.POSIXct(ooni$measurement_start_time, format="%Y-%m-%d")
+ooni$date <- format(ooni$measurement_start_time, format="%Y-%m-%d")
+ooni$date <- as.Date(ooni$date)
+
+###Create ratio of total requests
+###To identify blocked websites, a user sends a request to a number of websites, all within the same probe. Within each probe or individual report, I need at least one accessible website. By this, I can be confident that probes were effective and that not the user had troubles to access the website in general.
+
+ooni <- ooni %>%
+  group_by(report_id) %>%
+  mutate(any_accessible = any(accessible==TRUE))
+
+###Combine with global list files from Citizen Lab to associate websites
+global <- read_csv("global.csv")
+names(global)[1] <- "input"
+
+ooni <- left_join(ooni, global, by = "input")
+
+###Filter only relevant data (Human Right Issues etc.)
+ooni <- ooni %>%
+  dplyr::filter(category_code %in% c("ANON", "HACK", "HOST", "HUMR", "IGO", "LGBT", "MMED",
+                            "NEWS", "POLR", "REL", "GRP", "MILX"))
+
+```
+
+OONI data (Censored websites) Only Russia 
+```{r}
+ooni.rus <- read.csv("ooni.rus.csv")
+
+
+###Select only those requests where anomalies were detected 
+ooni.rus$anomaly <- ifelse(ooni.rus$blocking==FALSE,FALSE,TRUE)
+
+###Change date
+ooni.rus$measurement_start_time <- as.POSIXct(ooni.rus$measurement_start_time, format="%Y-%m-%d")
+ooni.rus$date <- format(ooni.rus$measurement_start_time, format="%Y-%m-%d")
+ooni.rus$date <- as.Date(ooni.rus$date)
+
+###Create ratio of total requests
+###To identify blocked websites, a user sends a request to a number of websites, all within the same probe. Within each probe or individual report, I need at least one accessible website. By this, I can be confident that probes were effective and that not the user had troubles to access the website in general.
+
+ooni.rus <- ooni.rus %>%
+  group_by(report_id) %>%
+  mutate(any_accessible = any(accessible==TRUE))
+
+###Combine with global list files from Citizen Lab to associate websites
+
+ooni.rus <- left_join(ooni.rus, global, by = "input")
+
+###Filter only relevant data (Human Right Issues etc.)
+ooni.rus <- ooni.rus %>%
+  dplyr::filter(category_code %in% c("ANON", "HACK", "HOST", "HUMR", "IGO", "LGBT", "MMED",
+                            "NEWS", "POLR", "REL", "GRP", "MILX"))
+
+```
+
+OONI data (Censored websites) Only Russia 2019
+```{r}
+ooni.rus.2019 <- read.csv("ooni.rus.2019.csv")
+
+
+###Select only those requests where anomalies were detected 
+ooni.rus.2019$anomaly <- ifelse(ooni.rus.2019$blocking==FALSE,FALSE,TRUE)
+
+###Change date
+ooni.rus.2019$measurement_start_time <- as.POSIXct(ooni.rus.2019$measurement_start_time, format="%Y-%m-%d")
+ooni.rus.2019$date <- format(ooni.rus.2019$measurement_start_time, format="%Y-%m-%d")
+ooni.rus.2019$date <- as.Date(ooni.rus.2019$date)
+
+###Create ratio of total requests
+###To identify blocked websites, a user sends a request to a number of websites, all within the same probe. Within each probe or individual report, I need at least one accessible website. By this, I can be confident that probes were effective and that not the user had troubles to access the website in general.
+
+ooni.rus.2019 <- ooni.rus.2019 %>%
+  group_by(report_id) %>%
+  mutate(any_accessible = any(accessible==TRUE))
+
+###Combine with global list files from Citizen Lab to associate websites
+
+ooni.rus.2019 <- left_join(ooni.rus.2019, global, by = "input")
+
+###Filter only relevant data (Human Right Issues etc.)
+ooni.rus.2019 <- ooni.rus.2019 %>%
+  dplyr::filter(category_code %in% c("ANON", "HACK", "HOST", "HUMR", "IGO", "LGBT", "MMED",
+                            "NEWS", "POLR", "REL", "GRP", "MILX"))
+
+```
+
+Add OONI data (any requests that have been made)
+```{r}
+ooni_aggr <- ooni %>%
+  group_by(date, probe_cc) %>% 
+  dplyr::count()%>%
+  dplyr::rename(cowcode=probe_cc, any_accessible=n)
+
+ooni_aggr$cowcode <- as.character(ooni_aggr$cowcode)
+ooni_aggr$event_date <- as.Date(ooni_aggr$date)
+
+events.all<-left_join(events, ooni_aggr, by=c("event_date", "cowcode"))
+
+events.all <- events.all %>% dplyr::select(!date)
+
+events.all <- events.all %>%
+  filter(!cowcode=="RU")
+
+###Only Russia
+ooni_aggr <- ooni.rus %>%
+  group_by(date, probe_cc) %>% 
+  dplyr::count()%>%
+  dplyr::rename(cowcode=probe_cc, any_accessible=n)
+
+ooni_aggr$cowcode <- as.character(ooni_aggr$cowcode)
+ooni_aggr$event_date <- as.Date(ooni_aggr$date)
+
+events.rus<-left_join(events, ooni_aggr, by=c("event_date", "cowcode"))
+
+events.rus <- events.rus %>% dplyr::select(!date)
+
+events.rus <- events.rus %>%
+  filter(cowcode=="RU")
+
+###Russia 2019
+ooni_aggr <- ooni.rus.2019 %>%
+  group_by(date, probe_cc) %>% 
+  dplyr::count()%>%
+  dplyr::rename(cowcode=probe_cc, any_accessible=n)
+
+ooni_aggr$cowcode <- as.character(ooni_aggr$cowcode)
+ooni_aggr$event_date <- as.Date(ooni_aggr$date)
+
+events.rus.2019<-left_join(events, ooni_aggr, by=c("event_date", "cowcode"))
+
+events.rus.2019 <- events.rus.2019 %>% dplyr::select(!date)
+
+events.rus.2019 <- events.rus.2019 %>%
+  filter(cowcode=="RU")
+
+
+
+```
+
+Add OONI data to days with and without protest
+```{r}
+#create empty dataframe on daily basis
+data <- expand.grid(seq(as.Date("2016-06-23"), as.Date("2020-10-21"), by = "day"),
+                    levels(as.factor(events$cowcode)))
+data <- data %>% dplyr::rename(date=Var1, country=Var2)
+
+ooni_aggr_data <- ooni %>%
+  filter(anomaly=TRUE) %>%
+  group_by(date, probe_cc) %>% 
+  dplyr::count()%>%
+  dplyr::rename(blocked=n, country=probe_cc)
+
+ooni_aggr_data$blocked <- 1
+
+data <- left_join(data, ooni_aggr_data, by=c("date", "country"))
+data$blocked[is.na(data$blocked)] <- 0
+
+events_aggr <- events %>%
+  group_by(event_date, cowcode) %>%
+  dplyr::count()%>%
+  dplyr::rename(protest=n, date=event_date, country=cowcode)
+  
+events_aggr$protest <- 1
+events_aggr$date <- as.Date(events_aggr$date)
+  
+data <- dplyr::left_join(data, events_aggr, by=c("date", "country"))
+
+data$protest[is.na(data$protest)] <- 0
+
+data$protest[data$protest == 1] <- 'protest'
+data$protest[data$protest == 0] <- 'no protest'
+
+data$blocked[data$blocked == 1] <- 'blocked'
+data$blocked[data$blocked == 0] <- 'not blocked'
+
+data <- data %>% dplyr::filter(!country=="RU")
+
+table(data$protest, data$blocked)
+```
+
+
+Add only blocked websites
+```{r}
+ooni_blocked <- ooni %>%
+  filter(anomaly==TRUE)
+
+ooni_blocked <- ooni_blocked %>%
+  group_by(date, probe_cc) %>% 
+  dplyr::count()%>%
+  dplyr::rename(cowcode=probe_cc, blocked=n)
+
+ooni_blocked$cowcode <- as.character(ooni_blocked$cowcode)
+ooni_blocked$event_date <- as.Date(ooni_blocked$date)
+
+events.all <-left_join(events.all, ooni_blocked, by=c("event_date", "cowcode"))
+events.all <- events.all %>% dplyr::select(!date)
+
+###create ratio
+events.all$blocked <- ifelse(is.na(events.all$blocked) & !(is.na(events.all$any_accessible)), 0, events.all$blocked)
+events.all$ooni_ratio <- events.all$blocked/events.all$any_accessible
+
+events.all$ooni <- ifelse(events.all$ooni_ratio > 0, 1, 0)
+
+```
+Add only blocked websites (Russia)
+```{r}
+ooni_blocked <- ooni.rus %>%
+  filter(anomaly==TRUE)
+
+ooni_blocked <- ooni_blocked %>%
+  group_by(date, probe_cc) %>% 
+  dplyr::count()%>%
+  dplyr::rename(cowcode=probe_cc, blocked=n)
+
+ooni_blocked$cowcode <- as.character(ooni_blocked$cowcode)
+ooni_blocked$event_date <- as.Date(ooni_blocked$date)
+
+events.rus <-left_join(events.rus, ooni_blocked, by=c("event_date", "cowcode"))
+events.rus <- events.rus %>% dplyr::select(!date)
+
+###create ratio
+events.rus$blocked <- ifelse(is.na(events.rus$blocked) & !(is.na(events.rus$any_accessible)), 0, events.rus$blocked)
+events.rus$ooni_ratio <- events.rus$blocked/events.rus$any_accessible
+
+events.rus$ooni <- ifelse(events.rus$ooni_ratio > 0, 1, 0)
+
+```
+
+Add only blocked websites (Russia, 2019)
+```{r}
+ooni_blocked <- ooni.rus.2019 %>%
+  filter(anomaly==TRUE)
+
+ooni_blocked <- ooni_blocked %>%
+  group_by(date, probe_cc) %>% 
+  dplyr::count()%>%
+  dplyr::rename(cowcode=probe_cc, blocked=n)
+
+ooni_blocked$cowcode <- as.character(ooni_blocked$cowcode)
+ooni_blocked$event_date <- as.Date(ooni_blocked$date)
+
+events.rus.2019 <-left_join(events.rus.2019, ooni_blocked, by=c("event_date", "cowcode"))
+events.rus.2019 <- events.rus.2019 %>% dplyr::select(!date)
+
+###create ratio
+events.rus.2019$blocked <- ifelse(is.na(events.rus.2019$blocked) & !(is.na(events.rus.2019$any_accessible)), 0, events.rus.2019$blocked)
+events.rus.2019$ooni_ratio <- events.rus.2019$blocked/events.rus.2019$any_accessible
+
+events.rus.2019$ooni <- ifelse(events.rus.2019$ooni_ratio > 0, 1, 0)
+
+```
+
+```{r}
+###Combine
+events <- rbind(events.all, events.rus)
+events <- rbind(events, events.rus.2019)
+```
+
+Add IODA data
+```{r}
+ioda <- read.csv("~/Documents/digitalrepression/Digital Repression/IODA/ioda_country.csv")
+
+ioda$start <- as_datetime(ioda$start, origin = lubridate::origin)
+ioda$start <- as.POSIXct(format(ioda$start, "%Y-%m-%d"))
+ioda$date <- as.Date(ioda$start)
+
+ioda_aggr <- ioda %>%
+  group_by(date, location_code) %>% 
+  dplyr::count() %>%
+  dplyr::rename(cowcode=location_code, ioda_number=n)
+
+ioda_aggr$event_date <- as.Date(ioda_aggr$date)
+
+events <- left_join(events, ioda_aggr, by=c("event_date", "cowcode"))
+events <- events %>% dplyr::select(!date)
+events$ioda_number[is.na(events$ioda_number)] <- 0
+events$ioda <- ifelse(events$ioda_number >= 1, 1, 0)
+```
+
+Modify physical repression
+```{r}
+events$physical[events$max_secengagement==0] <- 0
+events$physical[events$max_secengagement==1] <- 0
+events$physical[events$max_secengagement==2] <- 1
+events$physical[events$max_secengagement==3] <- 1
+
+#create year variable in events dataset
+events$year <- format(events$event_date, format="%Y")
+events$year <- as.numeric(events$year)
+
+```
+
+
+
+
+
+
+
+
+International NGO Dataset (Kayaalp)
+```{r}
+library(haven)
+INGO <- read_dta("INGO.dta")
+INGO <- INGO %>% dplyr::select(Ccode, Year, All_NGO, Global_NGO, National_ngo) %>% filter(Year==2016|Year==2017|Year==2018|Year==2019)
+
+INGO$Ccode <- countrycode(INGO$Ccode, origin = 'cown', destination = 'iso2c')
+INGO <- INGO %>% dplyr::rename("cowcode"="Ccode", "year"="Year")
+
+events <- left_join(events, INGO, by=c("cowcode", "year"))
+```
+ 
+WDI data
+```{r}
+wdi <- WDI(country = "all",
+      indicator = c("MS.MIL.XPND.GD.ZS", "NY.GDP.PETR.RT.ZS"),
+      start = 2016,
+      end = 2020)
+
+wdi <- wdi %>%
+  dplyr::select(-country, -iso3c)
+
+names(wdi) <- c("cowcode","year", "military", "oil")
+
+
+events <- left_join(events, wdi, by=c("year", "cowcode"))
+```
+
+VDem data
+```{r}
+vdem <- read_csv("DigitalSocietyProject-v3-CSV/DSP-Dataset-v3.csv")
+vdem <- vdem %>% 
+  select(country_name, year,v2smgovfilcap_ord, v2smgovshutcap_ord) %>% 
+  filter(!year<2016 & !year>2019)  %>% 
+  dplyr::rename(cowcode=country_name, filter_cap=v2smgovfilcap_ord, shut_cap=v2smgovshutcap_ord)
+
+vdem$cowcode <- countrycode(vdem$cowcode, origin = 'country.name', destination = 'iso2c')
+
+vdem$year <- as.numeric(vdem$year)
+events <- dplyr::left_join(events, vdem, by=c("cowcode", "year"))
+
+```
+
+Export dataset
+```{r}
+events <- events %>%
+  filter(event_date >= '2016-06-23' & event_date <'2020-01-01')
+write.csv(events, "df-repression.csv", row.names = FALSE)
+```
