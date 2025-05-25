@@ -1,0 +1,72 @@
+---
+title: "ioda-repression"
+author: "Rebecca Strauch"
+date: "4/21/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(vdem)
+library(tidyverse)
+library(countrycode)
+library(jsonlite)
+```
+
+Create list for all countries covering the time frame 2016 to 2020
+```{r}
+https://ioda.caida.org/ioda/data/events?from=1561579200&until=1561586400&human=true&meta=country/IR
+
+vdem <- extract_vdem(name_pattern = "v2x_regime")
+vdem <- vdem %>%
+  filter(v2x_regime<=1) %>%
+  select(vdem_country_name) %>%
+  unique() 
+
+vdem$vdem_country_name <- countrycode(vdem$vdem_country_name, origin = 'country.name', destination = 'iso2c')
+
+
+###create URL
+vdem$url = paste("https://ioda.caida.org/ioda/data/events?from=1451602800&until1609455599=&human=true&meta=country/", vdem$vdem_country_name, sep = "")
+
+```
+
+Scrape datafiles from IODA's API
+```{r}
+url <- vdem %>%
+  select(url)
+
+for (url in url) {
+  if (!file.exists(".json")) {
+    test <- download.file(url, destfile = paste0(basename(url), ".json"))
+  }
+}
+
+#Load all JSON files to R
+temp = list.files(pattern="*.json")
+
+for (files in temp){ 
+  file <- fromJSON(files, flatten=TRUE)
+}
+#create list of JSON files
+ioda <- purrr::map_df(temp, function(x) { 
+  purrr::map(jsonlite::fromJSON(x), function(y) ifelse(is.null(y), NA, y)) 
+})
+
+#drop empty lists
+ioda <- ioda$data[ sapply(ioda$data, length) >0]
+
+#unnest lists to dataframes 
+ioda <- ioda %>% 
+  bind_rows(ioda) %>%    # make larger sample data
+  mutate_if(is.list, simplify_all) %>%    # flatten each list element internally 
+  unnest(cols = c()) %>%
+  distinct()
+
+
+
+write.csv(ioda,"ioda_country.csv", row.names = F)
+
+```
+
+
