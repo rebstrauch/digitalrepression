@@ -1,1 +1,1 @@
-# digitalrepression
+This repository contains R code for the data management and analyses process of the working paper: International advocacy on digital and non-digital repression in autocracies. In addition, it provides the code for wrangling data on online censorship from the "Open Observatory of Network Interference" (https://ooni.org) which was previously fetched from Amazon S3 bucket, and to scrape Internet outages via IODA's API ("Internet Outages and Detection Analysis Center", https://ioda.inetintel.cc.gatech.edu).
